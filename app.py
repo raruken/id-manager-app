@@ -29,7 +29,7 @@ dbx = dropbox.Dropbox(ACCESS_TOKEN)
 # ==============================
 # 設定
 # ==============================
-DROPBOX_FILE_PATH = "/id_management_file.csv.lnk"
+DROPBOX_FILE_PATH = "/id_management_file.csv"
 
 st.set_page_config(page_title="ID採番管理", layout="wide")
 st.title("📋 ID採番管理")
@@ -269,7 +269,7 @@ else:
     st.markdown("---")
     
     # ボタンセクション
-    col1, col2, col3 = st.columns([1, 1, 1])
+    col1, col2 = st.columns([1, 1])
     
     with col1:
         if st.button("🔄 リセット", use_container_width=True):
@@ -293,43 +293,3 @@ else:
             st.session_state.df = df
             st.success("変更を保存しました")
             st.rerun()
-    
-    with col3:
-        if csv_text_content:
-            lines = csv_text_content.split('\n')
-            for i, row in edited_df.iterrows():
-                if i + 1 < len(lines):
-                    values = lines[i + 1].split(',')
-                    if len(values) >= 4:
-                        # IDを文字列として確実に扱う
-                        pid_str = str(row['分配PID']) if pd.notna(row['分配PID']) and str(row['分配PID']) != 'nan' else ''
-                        id_str = str(row['分配ID']) if pd.notna(row['分配ID']) and str(row['分配ID']) != 'nan' else ''
-                        result_id_str = str(row['整備結果ID']) if pd.notna(row['整備結果ID']) and str(row['整備結果ID']) != 'nan' else ''
-                        values[1] = pid_str
-                        values[2] = id_str
-                        values[3] = result_id_str
-                        lines[i + 1] = ','.join(values)
-            csv_content = '\n'.join(lines)
-        else:
-            # ID列が文字列型であることを確認してからCSVに変換
-            csv_df = edited_df.copy()
-            if '分配PID' in csv_df.columns:
-                csv_df['分配PID'] = csv_df['分配PID'].astype(str).replace('nan', '')
-            if '分配ID' in csv_df.columns:
-                csv_df['分配ID'] = csv_df['分配ID'].astype(str).replace('nan', '')
-            if '整備結果ID' in csv_df.columns:
-                csv_df['整備結果ID'] = csv_df['整備結果ID'].astype(str).replace('nan', '')
-            csv_content = csv_df.to_csv(index=False)
-        
-        try:
-            csv_bytes = csv_content.encode('shift_jis')
-        except UnicodeEncodeError:
-            csv_bytes = ('\uFEFF' + csv_content).encode('utf-8')
-        
-        st.download_button(
-            label="💾 CSVダウンロード",
-            data=csv_bytes,
-            file_name="id_management_file.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
