@@ -224,7 +224,6 @@ else:
             df,
             use_container_width=True,
             num_rows="dynamic",
-            blank_value="",
             column_config={
                 "年": st.column_config.TextColumn("年"),
                 "分配PID": st.column_config.TextColumn("分配PID"),
