@@ -9,6 +9,14 @@ try:
 except ImportError:
     HAS_CHARDET = False
 
+def sanitize_value(value):
+    if value is None:
+        return ""
+    value_str = str(value).strip()
+    if value_str.lower() in ("nan", "none"):
+        return ""
+    return value_str
+
 # ==============================
 # Dropbox永続接続処理
 # ==============================
@@ -103,10 +111,10 @@ def save_csv_to_dropbox(df, path, original_text=None):
             header_cols = lines[0].split(',') if lines else []
             num_cols = len(header_cols) if header_cols else 4
             for i, row in df.iterrows():
-                year_str = str(row['年']) if pd.notna(row['年']) and str(row['年']) != 'nan' else ''
-                pid_str = str(row['分配PID']) if pd.notna(row['分配PID']) and str(row['分配PID']) != 'nan' else ''
-                id_str = str(row['分配ID']) if pd.notna(row['分配ID']) and str(row['分配ID']) != 'nan' else ''
-                result_id_str = str(row['整備結果ID']) if pd.notna(row['整備結果ID']) and str(row['整備結果ID']) != 'nan' else ''
+                year_str = sanitize_value(row.get('年', ''))
+                pid_str = sanitize_value(row.get('分配PID', ''))
+                id_str = sanitize_value(row.get('分配ID', ''))
+                result_id_str = sanitize_value(row.get('整備結果ID', ''))
                 
                 if i + 1 < len(lines):
                     values = lines[i + 1].split(',')
@@ -135,12 +143,9 @@ def save_csv_to_dropbox(df, path, original_text=None):
         else:
             # ID列が文字列型であることを確認してからCSVに変換
             csv_df = df.copy()
-            if '分配PID' in csv_df.columns:
-                csv_df['分配PID'] = csv_df['分配PID'].astype(str).replace('nan', '')
-            if '分配ID' in csv_df.columns:
-                csv_df['分配ID'] = csv_df['分配ID'].astype(str).replace('nan', '')
-            if '整備結果ID' in csv_df.columns:
-                csv_df['整備結果ID'] = csv_df['整備結果ID'].astype(str).replace('nan', '')
+            for col in ['年', '分配PID', '分配ID', '整備結果ID']:
+                if col in csv_df.columns:
+                    csv_df[col] = csv_df[col].apply(sanitize_value)
             csv_content = csv_df.to_csv(index=False)
         
         try:
@@ -157,7 +162,6 @@ def save_csv_to_dropbox(df, path, original_text=None):
 # ==============================
 # メイン処理
 # ==============================
-
 st.markdown("---")
 st.subheader("📁 ファイル読み込み")
 uploaded_file = st.file_uploader("id_management_file.csv を選択", type=['csv'], key="csv_uploader")
@@ -204,6 +208,9 @@ else:
     st.subheader("📋 ID管理データ編集")
     st.caption("テーブル下部の「+ Add row」から年度行を追加できます。")
     
+    if not df.empty:
+        df = df.applymap(sanitize_value)
+
     # デバッグ情報（開発時のみ）
     with st.expander("🔧 デバッグ情報"):
         st.write("**DataFrame型情報:**")
@@ -217,6 +224,7 @@ else:
             df,
             use_container_width=True,
             num_rows="dynamic",
+            blank_value="",
             column_config={
                 "年": st.column_config.TextColumn("年"),
                 "分配PID": st.column_config.TextColumn("分配PID"),
@@ -225,13 +233,10 @@ else:
             },
             key="data_editor"
         )
-        # ID列を文字列型に確実に変換（データエディタの結果を文字列として保持）
-        if '分配PID' in edited_df.columns:
-            edited_df['分配PID'] = edited_df['分配PID'].astype(str).replace('nan', '')
-        if '分配ID' in edited_df.columns:
-            edited_df['分配ID'] = edited_df['分配ID'].astype(str).replace('nan', '')
-        if '整備結果ID' in edited_df.columns:
-            edited_df['整備結果ID'] = edited_df['整備結果ID'].astype(str).replace('nan', '')
+        # 列を文字列化し「None」「nan」を空文字に変換
+        for col in ['年', '分配PID', '分配ID', '整備結果ID']:
+            if col in edited_df.columns:
+                edited_df[col] = edited_df[col].apply(sanitize_value)
     except Exception as e:
         st.error(f"❌ データエディタエラー: {e}")
         st.info("デバッグ情報を確認して、DataFrame の型を確認してください。")
@@ -255,12 +260,9 @@ else:
         if st.button("✅ 変更を保存", type="primary", use_container_width=True):
             df = edited_df.copy()
             # ID列を文字列型に確実に変換
-            if '分配PID' in df.columns:
-                df['分配PID'] = df['分配PID'].astype(str).replace('nan', '')
-            if '分配ID' in df.columns:
-                df['分配ID'] = df['分配ID'].astype(str).replace('nan', '')
-            if '整備結果ID' in df.columns:
-                df['整備結果ID'] = df['整備結果ID'].astype(str).replace('nan', '')
+            for col in ['年', '分配PID', '分配ID', '整備結果ID']:
+                if col in df.columns:
+                    df[col] = df[col].apply(sanitize_value)
             try:
                 updated_text = save_csv_to_dropbox(
                     df,
