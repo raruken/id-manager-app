@@ -29,7 +29,7 @@ dbx = dropbox.Dropbox(ACCESS_TOKEN)
 # ==============================
 # 設定
 # ==============================
-DROPBOX_FILE_PATH = "/id_management_file.csv"
+DROPBOX_FILE_PATH = "/test/id_management_file.csv"
 
 st.set_page_config(page_title="ID採番管理", layout="wide")
 st.title("📋 ID採番管理")
