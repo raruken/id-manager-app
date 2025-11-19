@@ -197,9 +197,15 @@ st.markdown("---")
 st.subheader("📁 ファイル読み込み")
 uploaded_file = st.file_uploader("id_management_file.csv を選択", type=['csv'], key="csv_uploader")
 
-df = pd.DataFrame()
+# セッション状態の初期化
+if 'df' not in st.session_state:
+    st.session_state.df = pd.DataFrame()
+if 'csv_text_content' not in st.session_state:
+    st.session_state.csv_text_content = None
+
+df = st.session_state.df
 error_info = None
-csv_text_content = None
+csv_text_content = st.session_state.csv_text_content
 
 if uploaded_file is not None:
     file_bytes = uploaded_file.read()
@@ -209,6 +215,8 @@ if uploaded_file is not None:
         st.error(error_info)
     elif not df.empty:
         st.success(f"✅ {uploaded_file.name} を読み込みました（Shift-JIS）")
+        st.session_state.df = df
+        st.session_state.csv_text_content = csv_text_content
 else:
     st.info("💡 ローカルファイルをアップロードするか、Dropboxから読み込みます")
     use_dropbox = st.checkbox("Dropboxから読み込む", value=False)
@@ -217,6 +225,9 @@ else:
         df, error_info, csv_text_content = load_csv_from_dropbox(DROPBOX_FILE_PATH)
         if error_info:
             st.error(error_info)
+        elif not df.empty:
+            st.session_state.df = df
+            st.session_state.csv_text_content = csv_text_content
 
 if df.empty:
     st.error("❌ ファイルが読み込めませんでした")
@@ -281,6 +292,52 @@ else:
     st.markdown("---")
     st.subheader("📋 ID管理データ編集")
     
+    # 年度追加機能
+    st.markdown("#### ➕ 年度追加")
+    col_add1, col_add2 = st.columns([2, 1])
+    with col_add1:
+        new_year = st.text_input("追加する年度を入力", key="new_year_input", placeholder="例: 2024")
+    with col_add2:
+        add_year_button = st.button("📅 年度を追加", type="primary", use_container_width=True, key="add_year_button")
+    
+    if add_year_button:
+        if new_year and new_year.strip():
+            new_year_str = str(new_year.strip())
+            # 既存の年度を確認
+            existing_years = df['年'].astype(str).tolist() if '年' in df.columns else []
+            
+            if new_year_str in existing_years:
+                st.warning(f"⚠️ 年度「{new_year_str}」は既に存在します。")
+            else:
+                # 新しい年度の行を追加
+                new_row = pd.DataFrame({
+                    '年': [new_year_str],
+                    '分配PID': [''],
+                    '分配ID': [''],
+                    '整備結果ID': ['']
+                })
+                df = pd.concat([df, new_row], ignore_index=True)
+                
+                # 年度でソート（数値としてソートを試みる）
+                try:
+                    # 数値としてソート可能か試す
+                    df['年_数値'] = df['年'].astype(str).str.extract('(\d+)')[0].astype(float, errors='ignore')
+                    df = df.sort_values('年_数値', na_position='last')
+                    df = df.drop('年_数値', axis=1)
+                except:
+                    # 数値としてソートできない場合は文字列としてソート
+                    df = df.sort_values('年', na_position='last')
+                
+                df = df.reset_index(drop=True)
+                # セッション状態を更新
+                st.session_state.df = df
+                st.success(f"✅ 年度「{new_year_str}」を追加しました。")
+                st.rerun()
+        else:
+            st.warning("⚠️ 年度を入力してください。")
+    
+    st.markdown("---")
+    
     # デバッグ情報（開発時のみ）
     with st.expander("🔧 デバッグ情報"):
         st.write("**DataFrame型情報:**")
@@ -314,11 +371,17 @@ else:
     
     with col1:
         if st.button("🔄 リセット", use_container_width=True):
+            # セッション状態をクリアしてファイルから再読み込み
+            if 'df' in st.session_state:
+                del st.session_state.df
+            if 'csv_text_content' in st.session_state:
+                del st.session_state.csv_text_content
             st.rerun()
     
     with col2:
         if st.button("✅ 変更を保存", type="primary", use_container_width=True):
             df = edited_df.copy()
+            st.session_state.df = df
             st.success("変更を保存しました")
             st.rerun()
     
