@@ -100,18 +100,37 @@ def save_csv_to_dropbox(df, path, original_text=None):
     try:
         if original_text:
             lines = original_text.split('\n')
+            header_cols = lines[0].split(',') if lines else []
+            num_cols = len(header_cols) if header_cols else 4
             for i, row in df.iterrows():
+                year_str = str(row['年']) if pd.notna(row['年']) and str(row['年']) != 'nan' else ''
+                pid_str = str(row['分配PID']) if pd.notna(row['分配PID']) and str(row['分配PID']) != 'nan' else ''
+                id_str = str(row['分配ID']) if pd.notna(row['分配ID']) and str(row['分配ID']) != 'nan' else ''
+                result_id_str = str(row['整備結果ID']) if pd.notna(row['整備結果ID']) and str(row['整備結果ID']) != 'nan' else ''
+                
                 if i + 1 < len(lines):
                     values = lines[i + 1].split(',')
-                    if len(values) >= 4:
-                        # IDを文字列として確実に扱う
-                        pid_str = str(row['分配PID']) if pd.notna(row['分配PID']) and str(row['分配PID']) != 'nan' else ''
-                        id_str = str(row['分配ID']) if pd.notna(row['分配ID']) and str(row['分配ID']) != 'nan' else ''
-                        result_id_str = str(row['整備結果ID']) if pd.notna(row['整備結果ID']) and str(row['整備結果ID']) != 'nan' else ''
-                        values[1] = pid_str
-                        values[2] = id_str
-                        values[3] = result_id_str
-                        lines[i + 1] = ','.join(values)
+                else:
+                    values = [''] * num_cols
+                    lines.append('')
+                
+                if len(values) < num_cols:
+                    values.extend([''] * (num_cols - len(values)))
+                values[0] = year_str
+                if num_cols > 1:
+                    values[1] = pid_str
+                if num_cols > 2:
+                    values[2] = id_str
+                if num_cols > 3:
+                    values[3] = result_id_str
+                
+                target_index = i + 1 if i + 1 < len(lines) else len(lines) - 1
+                lines[target_index] = ','.join(values)
+            
+            # DataFrameの行数に合わせて行を調整（ヘッダー + データ行）
+            expected_lines = len(df) + 1
+            if len(lines) > expected_lines:
+                lines = lines[:expected_lines]
             csv_content = '\n'.join(lines)
         else:
             # ID列が文字列型であることを確認してからCSVに変換
@@ -183,59 +202,7 @@ if df.empty:
 else:
     st.markdown("---")
     st.subheader("📋 ID管理データ編集")
-    
-    # 年度追加機能
-    st.markdown("#### ➕ 年度追加")
-    col_add1, col_add2 = st.columns([2, 1])
-    with col_add1:
-        new_year = st.text_input("追加する年度を入力", key="new_year_input", placeholder="例: 2024")
-    with col_add2:
-        add_year_button = st.button("📅 年度を追加", type="primary", use_container_width=True, key="add_year_button")
-    
-    if add_year_button:
-        if new_year and new_year.strip():
-            new_year_str = str(new_year.strip())
-            # 既存の年度を確認
-            existing_years = df['年'].astype(str).tolist() if '年' in df.columns else []
-            
-            if new_year_str in existing_years:
-                st.warning(f"⚠️ 年度「{new_year_str}」は既に存在します。")
-            else:
-                # 新しい年度の行を追加（IDは文字列として初期化）
-                new_row = pd.DataFrame({
-                    '年': [new_year_str],
-                    '分配PID': [''],
-                    '分配ID': [''],
-                    '整備結果ID': ['']
-                }, dtype=str)
-                df = pd.concat([df, new_row], ignore_index=True)
-                
-                # 年度でソート（数値としてソートを試みる）
-                try:
-                    # 数値としてソート可能か試す
-                    df['年_数値'] = df['年'].astype(str).str.extract('(\d+)')[0].astype(float, errors='ignore')
-                    df = df.sort_values('年_数値', na_position='last')
-                    df = df.drop('年_数値', axis=1)
-                except:
-                    # 数値としてソートできない場合は文字列としてソート
-                    df = df.sort_values('年', na_position='last')
-                
-                df = df.reset_index(drop=True)
-                # ID列を文字列型に確実に変換
-                if '分配PID' in df.columns:
-                    df['分配PID'] = df['分配PID'].astype(str).replace('nan', '')
-                if '分配ID' in df.columns:
-                    df['分配ID'] = df['分配ID'].astype(str).replace('nan', '')
-                if '整備結果ID' in df.columns:
-                    df['整備結果ID'] = df['整備結果ID'].astype(str).replace('nan', '')
-                # セッション状態を更新
-                st.session_state.df = df
-                st.success(f"✅ 年度「{new_year_str}」を追加しました。")
-                st.rerun()
-        else:
-            st.warning("⚠️ 年度を入力してください。")
-    
-    st.markdown("---")
+    st.caption("テーブル下部の「+ Add row」から年度行を追加できます。")
     
     # デバッグ情報（開発時のみ）
     with st.expander("🔧 デバッグ情報"):
@@ -249,9 +216,9 @@ else:
         edited_df = st.data_editor(
             df,
             use_container_width=True,
-            num_rows="fixed",
+            num_rows="dynamic",
             column_config={
-                "年": st.column_config.TextColumn("年", disabled=True),
+                "年": st.column_config.TextColumn("年"),
                 "分配PID": st.column_config.TextColumn("分配PID"),
                 "分配ID": st.column_config.TextColumn("分配ID"),
                 "整備結果ID": st.column_config.TextColumn("整備結果ID")
