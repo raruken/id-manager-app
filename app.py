@@ -29,44 +29,11 @@ dbx = dropbox.Dropbox(ACCESS_TOKEN)
 # ==============================
 # 設定
 # ==============================
-DROPBOX_FILE_PATH = "/id_management_file.csv"
+DROPBOX_FILE_PATH = "/id_management_file.csv.lnk"
 
 st.set_page_config(page_title="ID採番管理", layout="wide")
 st.title("📋 ID採番管理")
 st.caption("分配PID、分配ID、整備結果IDの年別最終IDを編集できます")
-
-# ==============================
-# Dropboxディレクトリ探索
-# ==============================
-def validate_path(path):
-    """パスが有効かどうかを検証"""
-    if path is None:
-        return False
-    if path == "":
-        return True
-    if not isinstance(path, str):
-        return False
-    if not path.startswith("/"):
-        return False
-    return True
-
-def explore_dropbox_path(path):
-    """指定されたパスのディレクトリ内容を取得"""
-    if not validate_path(path):
-        return None
-    
-    if path == "" or path == "/":
-        normalized_path = ""
-    else:
-        normalized_path = path.rstrip("/")
-    
-    try:
-        result = dbx.files_list_folder(normalized_path)
-        return result.entries
-    except (dropbox.exceptions.BadInputError, dropbox.exceptions.ApiError):
-        return None
-    except Exception:
-        return None
 
 # ==============================
 # CSVの読み込み（Shift-JIS対応）
@@ -122,46 +89,8 @@ def load_csv_from_dropbox(path):
         df, error_info, text_data = load_csv_from_bytes(data)
         return df, error_info, text_data
     except dropbox.exceptions.ApiError as e:
-        error_msg = str(e)
-        error_info = ["❌ **エラー:** ファイルが見つかりませんでした"]
-        error_info.append(f"**指定されたパス:** `{path}`")
-        
-        is_not_found = "not_found" in str(e).lower()
-        
-        if is_not_found:
-            path_parts = [p for p in path.split("/") if p]
-            if len(path_parts) > 1:
-                parent_path = "/" + "/".join(path_parts[:-1])
-            else:
-                parent_path = ""
-            
-            if parent_path == "":
-                error_info.append(f"\n**親ディレクトリ:** ルートディレクトリ（空文字列）")
-            else:
-                error_info.append(f"\n**親ディレクトリ:** `{parent_path}`")
-            
-            try:
-                explore_path = parent_path if parent_path != "" else ""
-                entries = explore_dropbox_path(explore_path) if explore_path != "" else dbx.files_list_folder("").entries
-                if entries:
-                    available_files = []
-                    available_folders = []
-                    for entry in entries:
-                        if isinstance(entry, dropbox.files.FileMetadata):
-                            available_files.append(f"📄 {entry.name}")
-                        elif isinstance(entry, dropbox.files.FolderMetadata):
-                            available_folders.append(f"📁 {entry.name}/")
-                    
-                    if available_files or available_folders:
-                        error_info.append("\n**このディレクトリ内のファイル/フォルダ:**")
-                        for folder in available_folders:
-                            error_info.append(f"  {folder}")
-                        for file in available_files:
-                            error_info.append(f"  {file}")
-            except Exception as explore_error:
-                error_info.append(f"\n⚠️ ディレクトリ探索中にエラー: {explore_error}")
-        
-        return pd.DataFrame(), "\n".join(error_info), None
+        error_info = f"❌ **エラー:** ファイルが見つかりませんでした\n**指定されたパス:** `{path}`"
+        return pd.DataFrame(), error_info, None
 
 # ==============================
 # CSVの保存
@@ -247,60 +176,6 @@ if df.empty:
     
     if error_info:
         st.markdown(error_info)
-    
-    st.markdown("---")
-    st.subheader("🔍 パス探索機能")
-    st.info("以下の機能を使って、正しいファイルパスを見つけてください。")
-    
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        explore_path = st.text_input("探索するパスを入力（ルートは空欄または /）", value="", key="explore_path_input", placeholder="空欄でルートディレクトリ、例: /SARTRASサーバー")
-    with col2:
-        explore_button = st.button("🔍 パスを探索", type="primary", key="explore_button")
-    
-    if explore_button:
-        normalized_explore_path = explore_path.strip()
-        if normalized_explore_path == "" or normalized_explore_path == "/":
-            normalized_explore_path = ""
-            display_path = "ルートディレクトリ（空文字列）"
-        else:
-            display_path = normalized_explore_path
-            if not normalized_explore_path.startswith("/"):
-                st.warning("⚠️ パスは `/` で始まる必要があります。")
-                normalized_explore_path = None
-        
-        if normalized_explore_path is not None:
-            entries = explore_dropbox_path(normalized_explore_path)
-            if entries is not None and len(entries) > 0:
-                st.success(f"✅ パス `{display_path}` の内容:")
-                
-                folders = [e for e in entries if isinstance(e, dropbox.files.FolderMetadata)]
-                files = [e for e in entries if isinstance(e, dropbox.files.FileMetadata)]
-                
-                if folders:
-                    st.write("**📁 フォルダ:**")
-                    for entry in folders:
-                        if normalized_explore_path == "":
-                            full_path = f"/{entry.name}"
-                        else:
-                            full_path = f"{normalized_explore_path.rstrip('/')}/{entry.name}"
-                        st.code(full_path, language=None)
-                
-                if files:
-                    st.write("**📄 ファイル:**")
-                    for entry in files:
-                        if normalized_explore_path == "":
-                            full_path = f"/{entry.name}"
-                        else:
-                            full_path = f"{normalized_explore_path.rstrip('/')}/{entry.name}"
-                        file_size_kb = entry.size / 1024
-                        st.write(f"`{full_path}` ({file_size_kb:.1f} KB)")
-            elif entries is not None and len(entries) == 0:
-                st.info(f"ℹ️ パス `{display_path}` は存在しますが、空のディレクトリです。")
-            else:
-                st.error(f"❌ パス `{display_path}` が見つかりませんでした。")
-                if normalized_explore_path != "":
-                    st.info("💡 ヒント: ルートディレクトリ（空欄）から探索を始めてください。")
 else:
     st.markdown("---")
     st.subheader("📋 ID管理データ編集")
