@@ -90,7 +90,8 @@ def load_csv_from_bytes(data, encoding='shift_jis'):
                 else:
                     text_data = data.decode('utf-8', errors='ignore')
         
-        df = pd.read_csv(StringIO(text_data), header=0)
+        # すべての列を文字列として読み込む（IDを文字列として扱うため）
+        df = pd.read_csv(StringIO(text_data), header=0, dtype=str, keep_default_na=False)
         
         if len(df.columns) >= 4:
             df_display = pd.DataFrame({
@@ -174,14 +175,26 @@ def save_csv_to_dropbox(df, path, original_text=None):
                 if i + 1 < len(lines):
                     values = lines[i + 1].split(',')
                     if len(values) >= 4:
-                        values[1] = str(row['分配PID']) if pd.notna(row['分配PID']) else ''
-                        values[2] = str(row['分配ID']) if pd.notna(row['分配ID']) else ''
-                        values[3] = str(row['整備結果ID']) if pd.notna(row['整備結果ID']) else ''
+                        # IDを文字列として確実に扱う
+                        pid_str = str(row['分配PID']) if pd.notna(row['分配PID']) and str(row['分配PID']) != 'nan' else ''
+                        id_str = str(row['分配ID']) if pd.notna(row['分配ID']) and str(row['分配ID']) != 'nan' else ''
+                        result_id_str = str(row['整備結果ID']) if pd.notna(row['整備結果ID']) and str(row['整備結果ID']) != 'nan' else ''
+                        values[1] = pid_str
+                        values[2] = id_str
+                        values[3] = result_id_str
                         lines[i + 1] = ','.join(values)
             csv_content = '\n'.join(lines)
             csv_bytes = csv_content.encode('shift_jis')
         else:
-            csv_bytes = df.to_csv(index=False).encode("shift_jis")
+            # ID列が文字列型であることを確認してからCSVに変換
+            csv_df = df.copy()
+            if '分配PID' in csv_df.columns:
+                csv_df['分配PID'] = csv_df['分配PID'].astype(str).replace('nan', '')
+            if '分配ID' in csv_df.columns:
+                csv_df['分配ID'] = csv_df['分配ID'].astype(str).replace('nan', '')
+            if '整備結果ID' in csv_df.columns:
+                csv_df['整備結果ID'] = csv_df['整備結果ID'].astype(str).replace('nan', '')
+            csv_bytes = csv_df.to_csv(index=False).encode("shift_jis")
         
         dbx.files_upload(csv_bytes, path, mode=dropbox.files.WriteMode.overwrite)
         st.success("Dropboxに保存しました。")
@@ -309,13 +322,13 @@ else:
             if new_year_str in existing_years:
                 st.warning(f"⚠️ 年度「{new_year_str}」は既に存在します。")
             else:
-                # 新しい年度の行を追加
+                # 新しい年度の行を追加（IDは文字列として初期化）
                 new_row = pd.DataFrame({
                     '年': [new_year_str],
                     '分配PID': [''],
                     '分配ID': [''],
                     '整備結果ID': ['']
-                })
+                }, dtype=str)
                 df = pd.concat([df, new_row], ignore_index=True)
                 
                 # 年度でソート（数値としてソートを試みる）
@@ -329,6 +342,13 @@ else:
                     df = df.sort_values('年', na_position='last')
                 
                 df = df.reset_index(drop=True)
+                # ID列を文字列型に確実に変換
+                if '分配PID' in df.columns:
+                    df['分配PID'] = df['分配PID'].astype(str).replace('nan', '')
+                if '分配ID' in df.columns:
+                    df['分配ID'] = df['分配ID'].astype(str).replace('nan', '')
+                if '整備結果ID' in df.columns:
+                    df['整備結果ID'] = df['整備結果ID'].astype(str).replace('nan', '')
                 # セッション状態を更新
                 st.session_state.df = df
                 st.success(f"✅ 年度「{new_year_str}」を追加しました。")
@@ -359,6 +379,13 @@ else:
             },
             key="data_editor"
         )
+        # ID列を文字列型に確実に変換（データエディタの結果を文字列として保持）
+        if '分配PID' in edited_df.columns:
+            edited_df['分配PID'] = edited_df['分配PID'].astype(str).replace('nan', '')
+        if '分配ID' in edited_df.columns:
+            edited_df['分配ID'] = edited_df['分配ID'].astype(str).replace('nan', '')
+        if '整備結果ID' in edited_df.columns:
+            edited_df['整備結果ID'] = edited_df['整備結果ID'].astype(str).replace('nan', '')
     except Exception as e:
         st.error(f"❌ データエディタエラー: {e}")
         st.info("デバッグ情報を確認して、DataFrame の型を確認してください。")
@@ -381,6 +408,13 @@ else:
     with col2:
         if st.button("✅ 変更を保存", type="primary", use_container_width=True):
             df = edited_df.copy()
+            # ID列を文字列型に確実に変換
+            if '分配PID' in df.columns:
+                df['分配PID'] = df['分配PID'].astype(str).replace('nan', '')
+            if '分配ID' in df.columns:
+                df['分配ID'] = df['分配ID'].astype(str).replace('nan', '')
+            if '整備結果ID' in df.columns:
+                df['整備結果ID'] = df['整備結果ID'].astype(str).replace('nan', '')
             st.session_state.df = df
             st.success("変更を保存しました")
             st.rerun()
@@ -392,13 +426,25 @@ else:
                 if i + 1 < len(lines):
                     values = lines[i + 1].split(',')
                     if len(values) >= 4:
-                        values[1] = str(row['分配PID']) if pd.notna(row['分配PID']) else ''
-                        values[2] = str(row['分配ID']) if pd.notna(row['分配ID']) else ''
-                        values[3] = str(row['整備結果ID']) if pd.notna(row['整備結果ID']) else ''
+                        # IDを文字列として確実に扱う
+                        pid_str = str(row['分配PID']) if pd.notna(row['分配PID']) and str(row['分配PID']) != 'nan' else ''
+                        id_str = str(row['分配ID']) if pd.notna(row['分配ID']) and str(row['分配ID']) != 'nan' else ''
+                        result_id_str = str(row['整備結果ID']) if pd.notna(row['整備結果ID']) and str(row['整備結果ID']) != 'nan' else ''
+                        values[1] = pid_str
+                        values[2] = id_str
+                        values[3] = result_id_str
                         lines[i + 1] = ','.join(values)
             csv_content = '\n'.join(lines)
         else:
-            csv_content = edited_df.to_csv(index=False)
+            # ID列が文字列型であることを確認してからCSVに変換
+            csv_df = edited_df.copy()
+            if '分配PID' in csv_df.columns:
+                csv_df['分配PID'] = csv_df['分配PID'].astype(str).replace('nan', '')
+            if '分配ID' in csv_df.columns:
+                csv_df['分配ID'] = csv_df['分配ID'].astype(str).replace('nan', '')
+            if '整備結果ID' in csv_df.columns:
+                csv_df['整備結果ID'] = csv_df['整備結果ID'].astype(str).replace('nan', '')
+            csv_content = csv_df.to_csv(index=False)
         
         try:
             csv_bytes = csv_content.encode('shift_jis')
