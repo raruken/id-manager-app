@@ -13,14 +13,12 @@ except ImportError:
 # Dropbox永続接続処理
 # ==============================
 def get_dropbox_access_token():
-
     data = {
         "grant_type": "refresh_token",
         "refresh_token": st.secrets["DROPBOX_REFRESH_TOKEN"],
         "client_id": st.secrets["DROPBOX_APP_KEY"],
         "client_secret": st.secrets["DROPBOX_APP_SECRET"],
     }
-
     res = requests.post("https://api.dropboxapi.com/oauth2/token", data=data)
     res.raise_for_status()
     return res.json()["access_token"]
@@ -44,40 +42,30 @@ def validate_path(path):
     """パスが有効かどうかを検証"""
     if path is None:
         return False
-    # 空文字列はルートディレクトリとして有効
     if path == "":
         return True
     if not isinstance(path, str):
         return False
-    # パスは/で始まる必要がある（空文字列以外の場合）
     if not path.startswith("/"):
         return False
     return True
 
 def explore_dropbox_path(path):
     """指定されたパスのディレクトリ内容を取得"""
-    # パスの検証
     if not validate_path(path):
         return None
     
-    # ルートディレクトリの場合は空文字列を使用
     if path == "" or path == "/":
         normalized_path = ""
     else:
-        # パスを正規化（末尾の/を削除）
         normalized_path = path.rstrip("/")
     
     try:
         result = dbx.files_list_folder(normalized_path)
         return result.entries
-    except dropbox.exceptions.BadInputError as e:
-        # 無効なパス形式
+    except (dropbox.exceptions.BadInputError, dropbox.exceptions.ApiError):
         return None
-    except dropbox.exceptions.ApiError as e:
-        # その他のAPIエラー（not_foundなど）
-        return None
-    except Exception as e:
-        # 予期しないエラー
+    except Exception:
         return None
 
 # ==============================
@@ -86,41 +74,36 @@ def explore_dropbox_path(path):
 def load_csv_from_bytes(data, encoding='shift_jis'):
     """バイトデータからCSVを読み込む（Shift-JIS対応）"""
     try:
-        # 指定されたエンコーディングでデコード
         try:
             text_data = data.decode(encoding)
         except UnicodeDecodeError:
-            # Shift-JISで失敗した場合、UTF-8を試行
             try:
                 text_data = data.decode('utf-8')
             except UnicodeDecodeError:
-                # エンコーディングを自動検出（chardetが利用可能な場合）
                 if HAS_CHARDET:
                     try:
                         detected = chardet.detect(data)
                         encoding = detected['encoding'] if detected['encoding'] else 'utf-8'
                         text_data = data.decode(encoding)
                     except:
-                        # 自動検出に失敗した場合はUTF-8を試行
                         text_data = data.decode('utf-8', errors='ignore')
                 else:
-                    # chardetが利用できない場合はUTF-8を試行
                     text_data = data.decode('utf-8', errors='ignore')
         
-        # CSVを読み込む（A列=年度、B列=分配PID、C列=分配ID、D列=整備結果ID）
         df = pd.read_csv(StringIO(text_data), header=0)
         
-        # 必要な列のみを抽出（A列=0, B列=1, C列=2, D列=3）
         if len(df.columns) >= 4:
-            # 列名をリネーム
             df_display = pd.DataFrame({
-                '年': df.iloc[:, 0],
-                '分配PID': df.iloc[:, 1],
-                '分配ID': df.iloc[:, 2],
-                '整備結果ID': df.iloc[:, 3]
+                '年': df.iloc[:, 0].astype(str),
+                '分配PID': df.iloc[:, 1].astype(str),
+                '分配ID': df.iloc[:, 2].astype(str),
+                '整備結果ID': df.iloc[:, 3].astype(str)
             })
         else:
             df_display = df.copy()
+            # すべての列を文字列型に統一
+            for col in df_display.columns:
+                df_display[col] = df_display[col].astype(str)
         
         return df_display, None, text_data
     except pd.errors.EmptyDataError:
@@ -139,45 +122,24 @@ def load_csv_from_dropbox(path):
         return df, error_info, text_data
     except dropbox.exceptions.ApiError as e:
         error_msg = str(e)
-        error_info = []
-        error_info.append("❌ **エラー:** ファイルが見つかりませんでした")
+        error_info = ["❌ **エラー:** ファイルが見つかりませんでした"]
         error_info.append(f"**指定されたパス:** `{path}`")
         
-        # パスが見つからない場合、親ディレクトリを探索
-        is_not_found = False
-        if hasattr(e, 'error'):
-            if hasattr(e.error, 'get_path'):
-                path_error = e.error.get_path()
-                if path_error and hasattr(path_error, 'get_not_found'):
-                    is_not_found = True
-        
-        # 文字列からも判定
-        if not is_not_found:
-            error_str = str(e).lower()
-            if "not_found" in error_str:
-                is_not_found = True
+        is_not_found = "not_found" in str(e).lower()
         
         if is_not_found:
-            # 親ディレクトリを取得
-            path_parts = [p for p in path.split("/") if p]  # 空文字列を除外
-            if len(path_parts) > 0:
-                # ファイル名を除いた親ディレクトリ
-                if len(path_parts) > 1:
-                    parent_path = "/" + "/".join(path_parts[:-1])
-                else:
-                    # ルートディレクトリのファイルの場合
-                    parent_path = ""  # 空文字列がルートディレクトリ
+            path_parts = [p for p in path.split("/") if p]
+            if len(path_parts) > 1:
+                parent_path = "/" + "/".join(path_parts[:-1])
             else:
-                parent_path = ""  # ルートディレクトリ
+                parent_path = ""
             
             if parent_path == "":
                 error_info.append(f"\n**親ディレクトリ:** ルートディレクトリ（空文字列）")
             else:
                 error_info.append(f"\n**親ディレクトリ:** `{parent_path}`")
             
-            # 親ディレクトリを探索
             try:
-                # ルートディレクトリの場合は空文字列を使用
                 explore_path = parent_path if parent_path != "" else ""
                 entries = explore_dropbox_path(explore_path) if explore_path != "" else dbx.files_list_folder("").entries
                 if entries:
@@ -195,8 +157,6 @@ def load_csv_from_dropbox(path):
                             error_info.append(f"  {folder}")
                         for file in available_files:
                             error_info.append(f"  {file}")
-                else:
-                    error_info.append("\n⚠️ 親ディレクトリも見つかりませんでした。")
             except Exception as explore_error:
                 error_info.append(f"\n⚠️ ディレクトリ探索中にエラー: {explore_error}")
         
@@ -209,7 +169,6 @@ def save_csv_to_dropbox(df, path, original_text=None):
     """DropboxにCSVを保存（元のCSV構造を保持）"""
     try:
         if original_text:
-            # 元のCSVテキストを更新
             lines = original_text.split('\n')
             for i, row in df.iterrows():
                 if i + 1 < len(lines):
@@ -222,7 +181,6 @@ def save_csv_to_dropbox(df, path, original_text=None):
             csv_content = '\n'.join(lines)
             csv_bytes = csv_content.encode('shift_jis')
         else:
-            # 新しいCSVとして保存
             csv_bytes = df.to_csv(index=False).encode("shift_jis")
         
         dbx.files_upload(csv_bytes, path, mode=dropbox.files.WriteMode.overwrite)
@@ -235,7 +193,6 @@ def save_csv_to_dropbox(df, path, original_text=None):
 # メイン処理
 # ==============================
 
-# ファイルアップロード機能
 st.markdown("---")
 st.subheader("📁 ファイル読み込み")
 uploaded_file = st.file_uploader("id_management_file.csv を選択", type=['csv'], key="csv_uploader")
@@ -245,7 +202,6 @@ error_info = None
 csv_text_content = None
 
 if uploaded_file is not None:
-    # アップロードされたファイルを読み込む
     file_bytes = uploaded_file.read()
     df, error_info, csv_text_content = load_csv_from_bytes(file_bytes, encoding='shift_jis')
     
@@ -254,7 +210,6 @@ if uploaded_file is not None:
     elif not df.empty:
         st.success(f"✅ {uploaded_file.name} を読み込みました（Shift-JIS）")
 else:
-    # Dropboxから読み込む（オプション）
     st.info("💡 ローカルファイルをアップロードするか、Dropboxから読み込みます")
     use_dropbox = st.checkbox("Dropboxから読み込む", value=False)
     
@@ -273,16 +228,13 @@ if df.empty:
     st.subheader("🔍 パス探索機能")
     st.info("以下の機能を使って、正しいファイルパスを見つけてください。")
     
-    # パス探索用のUI
     col1, col2 = st.columns([3, 1])
     with col1:
         explore_path = st.text_input("探索するパスを入力（ルートは空欄または /）", value="", key="explore_path_input", placeholder="空欄でルートディレクトリ、例: /SARTRASサーバー")
     with col2:
         explore_button = st.button("🔍 パスを探索", type="primary", key="explore_button")
     
-    # ボタンがクリックされたときのみ探索を実行
     if explore_button:
-        # パスを正規化（空文字列または"/"はルートディレクトリ）
         normalized_explore_path = explore_path.strip()
         if normalized_explore_path == "" or normalized_explore_path == "/":
             normalized_explore_path = ""
@@ -298,7 +250,6 @@ if df.empty:
             if entries is not None and len(entries) > 0:
                 st.success(f"✅ パス `{display_path}` の内容:")
                 
-                # フォルダとファイルを分けて表示
                 folders = [e for e in entries if isinstance(e, dropbox.files.FolderMetadata)]
                 files = [e for e in entries if isinstance(e, dropbox.files.FileMetadata)]
                 
@@ -330,19 +281,31 @@ else:
     st.markdown("---")
     st.subheader("📋 ID管理データ編集")
     
+    # デバッグ情報（開発時のみ）
+    with st.expander("🔧 デバッグ情報"):
+        st.write("**DataFrame型情報:**")
+        st.write(df.dtypes)
+        st.write("**DataFrame先頭5行:**")
+        st.write(df.head())
+    
     # 編集可能なテーブル
-    edited_df = st.data_editor(
-        df,
-        use_container_width=True,
-        num_rows="fixed",
-        column_config={
-            "年": st.column_config.TextColumn("年", disabled=True),
-            "分配PID": st.column_config.TextColumn("分配PID"),
-            "分配ID": st.column_config.TextColumn("分配ID"),
-            "整備結果ID": st.column_config.TextColumn("整備結果ID")
-        },
-        key="data_editor"
-    )
+    try:
+        edited_df = st.data_editor(
+            df,
+            use_container_width=True,
+            num_rows="fixed",
+            column_config={
+                "年": st.column_config.TextColumn("年", disabled=True),
+                "分配PID": st.column_config.TextColumn("分配PID"),
+                "分配ID": st.column_config.TextColumn("分配ID"),
+                "整備結果ID": st.column_config.TextColumn("整備結果ID")
+            },
+            key="data_editor"
+        )
+    except Exception as e:
+        st.error(f"❌ データエディタエラー: {e}")
+        st.info("デバッグ情報を確認して、DataFrame の型を確認してください。")
+        st.stop()
     
     st.markdown("---")
     
@@ -355,13 +318,11 @@ else:
     
     with col2:
         if st.button("✅ 変更を保存", type="primary", use_container_width=True):
-            # 編集されたデータで更新
             df = edited_df.copy()
             st.success("変更を保存しました")
             st.rerun()
     
     with col3:
-        # CSVダウンロード用のデータを準備
         if csv_text_content:
             lines = csv_text_content.split('\n')
             for i, row in edited_df.iterrows():
@@ -376,11 +337,9 @@ else:
         else:
             csv_content = edited_df.to_csv(index=False)
         
-        # Shift-JISでエンコード
         try:
             csv_bytes = csv_content.encode('shift_jis')
         except UnicodeEncodeError:
-            # Shift-JISでエンコードできない場合はUTF-8 BOM付き
             csv_bytes = ('\uFEFF' + csv_content).encode('utf-8')
         
         st.download_button(
