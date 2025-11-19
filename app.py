@@ -113,7 +113,6 @@ def save_csv_to_dropbox(df, path, original_text=None):
                         values[3] = result_id_str
                         lines[i + 1] = ','.join(values)
             csv_content = '\n'.join(lines)
-            csv_bytes = csv_content.encode('shift_jis')
         else:
             # ID列が文字列型であることを確認してからCSVに変換
             csv_df = df.copy()
@@ -123,10 +122,15 @@ def save_csv_to_dropbox(df, path, original_text=None):
                 csv_df['分配ID'] = csv_df['分配ID'].astype(str).replace('nan', '')
             if '整備結果ID' in csv_df.columns:
                 csv_df['整備結果ID'] = csv_df['整備結果ID'].astype(str).replace('nan', '')
-            csv_bytes = csv_df.to_csv(index=False).encode("shift_jis")
+            csv_content = csv_df.to_csv(index=False)
+        
+        try:
+            csv_bytes = csv_content.encode('shift_jis')
+        except UnicodeEncodeError:
+            csv_bytes = ('\uFEFF' + csv_content).encode('utf-8')
         
         dbx.files_upload(csv_bytes, path, mode=dropbox.files.WriteMode.overwrite)
-        st.success("Dropboxに保存しました。")
+        return csv_content
     except dropbox.exceptions.ApiError as e:
         st.error(f"Dropboxへの保存エラー: {e}")
         raise
@@ -290,6 +294,17 @@ else:
                 df['分配ID'] = df['分配ID'].astype(str).replace('nan', '')
             if '整備結果ID' in df.columns:
                 df['整備結果ID'] = df['整備結果ID'].astype(str).replace('nan', '')
+            try:
+                updated_text = save_csv_to_dropbox(
+                    df,
+                    DROPBOX_FILE_PATH,
+                    st.session_state.csv_text_content
+                )
+                if updated_text is not None:
+                    st.session_state.csv_text_content = updated_text
+            except Exception as save_error:
+                st.error(f"❌ 保存に失敗しました: {save_error}")
+                st.stop()
             st.session_state.df = df
-            st.success("変更を保存しました")
+            st.success("Dropboxに保存しました")
             st.rerun()
